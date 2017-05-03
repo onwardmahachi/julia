@@ -112,8 +112,23 @@ size(a::Array{<:Any,N}) where {N} = (@_inline_meta; ntuple(M -> size(a, M), Val{
 
 asize_from(a::Array, n) = n > ndims(a) ? () : (arraysize(a,n), asize_from(a, n+1)...)
 
+function isbitsunion(U::Union)
+    for u in Base.uniontypes(U)
+        isbits(u) || return false
+    end
+    return true
+end
+isbitsunion(T) = false
+function bitsunionsize(U::Union)
+    sz = 0
+    for u in Base.uniontypes(U)
+        sz = max(sz, sizeof(u))
+    end
+    return sz
+end
+
 length(a::Array) = arraylen(a)
-elsize(a::Array{T}) where {T} = isbits(T) ? sizeof(T) : sizeof(Ptr)
+elsize(a::Array{T}) where {T} = isbits(T) ? sizeof(T) : (isbitsunion(T) ? bitsunionsize(T) : sizeof(Ptr))
 sizeof(a::Array) = Core.sizeof(a)
 
 function isassigned(a::Array, i::Int...)
@@ -121,6 +136,12 @@ function isassigned(a::Array, i::Int...)
     ii = (sub2ind(size(a), i...) % UInt) - 1
     @boundscheck ii < length(a) % UInt || return false
     ccall(:jl_array_isassigned, Cint, (Any, UInt), a, ii) == 1
+end
+
+## Union isbits selector bytes
+function selectorbytes(a::Array{T, N}) where {T, N}
+    isbitsunion(T) || return UInt8[]
+    return unsafe_wrap(Array{UInt8, N}, convert(Ptr{UInt8}, pointer(a)) + length(a) * elsize(T), size(a))
 end
 
 ## copy ##
