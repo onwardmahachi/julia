@@ -1503,6 +1503,13 @@ function bkfact!(A::StridedMatrix, uplo::Symbol, symmetric::Bool = issymmetric(A
     return bkfact!(symmetric ? Symmetric(A, uplo) : Hermitian(A, uplo), rook)
 end
 
+# PR #22182
+@deprecate is_apple   Sys.isapple
+@deprecate is_bsd     Sys.isbsd
+@deprecate is_linux   Sys.islinux
+@deprecate is_unix    Sys.isunix
+@deprecate is_windows Sys.iswindows
+
 # END 0.7 deprecations
 
 # BEGIN 1.0 deprecations

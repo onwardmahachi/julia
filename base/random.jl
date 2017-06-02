@@ -28,7 +28,7 @@ mutable struct Close1Open2 <: FloatInterval end
 
 ## RandomDevice
 
-if is_windows()
+if Sys.iswindows()
 
     struct RandomDevice <: AbstractRNG
         buffer::Vector{UInt128}

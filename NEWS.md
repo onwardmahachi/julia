@@ -127,6 +127,10 @@ Deprecated or removed
     Ternaries must now include some amount of whitespace, e.g. `x ? a : b` rather than
     `x? a : b` ([#22523]).
 
+  * The operating system identification functions: `is_linux`, `is_bsd`, `is_apple`, `is_unix`,
+    and `is_windows`, have been deprecated in favor of `Sys.islinux`, `Sys.isbsd`, `Sys.isapple`,
+    `Sys.isunix`, and `Sys.iswindows`, respectively ([#22182]).
+
 
 Julia v0.6.0 Release Notes
 ==========================
@@ -920,6 +924,7 @@ Command-line option changes
 [#22038]: https://github.com/JuliaLang/julia/issues/22038
 [#22062]: https://github.com/JuliaLang/julia/issues/22062
 [#22064]: https://github.com/JuliaLang/julia/issues/22064
+[#22182]: https://github.com/JuliaLang/julia/issues/22182
 [#22187]: https://github.com/JuliaLang/julia/issues/22187
 [#22188]: https://github.com/JuliaLang/julia/issues/22188
 [#22224]: https://github.com/JuliaLang/julia/issues/22224
