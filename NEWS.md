@@ -127,6 +127,10 @@ Deprecated or removed
     Ternaries must now include some amount of whitespace, e.g. `x ? a : b` rather than
     `x? a : b` ([#22523]).
 
+  * `read(io, type, dims)` is deprecated to `read!(io, Array{type}(dims))` ([#21450]).
+
+  * `read(::IO, ::Ref)` is now a method of `read!`, since it mutates its `Ref` argument ([#21592]).
+
 
 Julia v0.6.0 Release Notes
 ==========================
