@@ -15,7 +15,8 @@ struct InferenceParams
     # optimization
     inlining::Bool
     inline_cost_threshold::Int  # number of CPU cycles beyond which it's not worth inlining
-    inline_nonleaf_penalty::Int # penalty for runtime/vararg method lookup
+    inline_nonleaf_penalty::Int # penalty for dynamic dispatch
+    inline_tupleret_bonus::Int  # extra willlingness to inline for non-isbits tuple return types
 
     # parameters limiting potentially-infinite types (configurable)
     MAX_METHODS::Int
@@ -29,7 +30,8 @@ struct InferenceParams
     function InferenceParams(world::UInt;
                     inlining::Bool = inlining_enabled(),
                     inline_cost_threshold::Int = 100,
-                    inline_nonleaf_penalty::Int = 100,
+                    inline_nonleaf_penalty::Int = 1000,
+                    inline_tupleret_bonus::Int = 400,
                     max_methods::Int = 4,
                     tupletype_len::Int = 15,
                     tuple_depth::Int = 4,
@@ -37,7 +39,7 @@ struct InferenceParams
                     union_splitting::Int = 4,
                     apply_union_enum::Int = 8)
         return new(world, inlining, inline_cost_threshold, inline_nonleaf_penalty,
-                   max_methods, tupletype_len,
+                   inline_tupleret_bonus, max_methods, tupletype_len,
                    tuple_depth, tuple_splat, union_splitting, apply_union_enum)
     end
 end
@@ -3254,11 +3256,12 @@ end
 
 #### finalize and record the result of running type inference ####
 
-function isinlineable(m::Method, src::CodeInfo, params::InferenceParams)
+function isinlineable(m::Method, src::CodeInfo, mod::Module, params::InferenceParams, bonus::Int=0)
     # compute the cost (size) of inlining this code
     inlineable = false
     cost_threshold = params.inline_cost_threshold
     if m.module === _topmod(m.module)
+        # a few functions get special treatment
         name = m.name
         sig = m.sig
         if ((name === :+ || name === :* || name === :min || name === :max) &&
@@ -3271,7 +3274,7 @@ function isinlineable(m::Method, src::CodeInfo, params::InferenceParams)
         end
     end
     if !inlineable
-        inlineable = inline_worthy_stmts(src.code, params, cost_threshold)
+        inlineable = inline_worthy(src.code, src, mod, params, cost_threshold + bonus)
     end
     return inlineable
 end
@@ -3368,7 +3371,11 @@ function optimize(me::InferenceState)
     if force_noinline
         me.src.inlineable = false
     elseif !me.src.inlineable && isa(def, Method)
-        me.src.inlineable = isinlineable(def, me.src, me.params)
+        bonus = 0
+        if me.bestguess ⊑ Tuple && !isbits(widenconst(me.bestguess))
+            bonus = me.params.inline_tupleret_bonus
+        end
+        me.src.inlineable = isinlineable(def, me.src, me.mod, me.params, bonus)
     end
     me.src.inferred = true
     nothing
@@ -4351,27 +4358,6 @@ function inlineable(f::ANY, ft::ANY, e::Expr, atypes::Vector{Any}, sv::Inference
     end
     ast = ast::Array{Any,1}
 
-    # `promote` is a tuple-returning function that is very important to inline
-    if isdefined(Main, :Base) && isdefined(Main.Base, :promote) &&
-        length(sv.src.slottypes) > 0 && sv.src.slottypes[1] ⊑ typeof(getfield(Main.Base, :promote))
-        # check for non-isbits Tuple return
-        if sv.bestguess ⊑ Tuple && !isbits(widenconst(sv.bestguess))
-            # See if inlining this call would change the enclosing function
-            # from inlineable to not inlineable.
-            # This heuristic is applied to functions that return non-bits
-            # tuples, since we want to be able to inline those functions to
-            # avoid the tuple allocation.
-            current_stmts = vcat(sv.src.code, pending_stmts)
-            if inline_worthy_stmts(current_stmts, sv.params)
-                append!(current_stmts, ast)
-                if !inline_worthy_stmts(current_stmts, sv.params)
-                    return invoke_NF(argexprs0, e.typ, atypes0, sv, atype_unlimited,
-                                     invoke_data)
-                end
-            end
-        end
-    end
-
     # create the backedge
     if isa(frame, InferenceState) && !frame.inferred && frame.cached
         # in this case, the actual backedge linfo hasn't been computed
@@ -4431,7 +4417,7 @@ function inlineable(f::ANY, ft::ANY, e::Expr, atypes::Vector{Any}, sv::Inference
             end
         end
         free = effect_free(aei, sv.src, sv.mod, true)
-        if ((occ==0 && aeitype===Bottom) || (occ > 1 && !inline_worthy(aei, sv.params)) || #, occ*2000)) ||
+        if ((occ==0 && aeitype===Bottom) || (occ > 1 && !inline_worthy(aei, sv.src, sv.mod, sv.params)) ||
                 (affect_free && !free) || (!affect_free && !effect_free(aei, sv.src, sv.mod, false)))
             if occ != 0
                 vnew = newvar!(sv, aeitype)
@@ -4609,9 +4595,6 @@ function inlineable(f::ANY, ft::ANY, e::Expr, atypes::Vector{Any}, sv::Inference
     return (expr, stmts)
 end
 
-inline_worthy(body::ANY, params::InferenceParams,
-              cost_threshold::Integer=params.inline_cost_threshold) = true
-
 ## Computing the cost of a function body
 
 # saturating sum (inputs are nonnegative), prevents overflow with typemax(Int) below
@@ -4619,84 +4602,67 @@ plus_saturate(x, y) = max(x, y, x+y)
 # known return type
 isknowntype(T) = (T == Union{}) || isleaftype(T)
 
-statement_cost(::Any, params::InferenceParams, line::Int) = 0
+statement_cost(::Any, src::CodeInfo, mod::Module, params::InferenceParams, line::Int) = 0
 # statement_cost(mi::MethodInstance, params::InferenceParams, line::Int) =
 #     (isknowntype(mi.specTypes) & isknowntype(mi.rettype)) ? 0 : params.inline_nonleaf_penalty
-statement_cost(qn::QuoteNode, params::InferenceParams, line::Int) =
-    statement_cost(qn.value, params, line)
+statement_cost(qn::QuoteNode, src::CodeInfo, mod::Module, params::InferenceParams, line::Int) =
+    statement_cost(qn.value, src, mod, params, line)
 # function statement_cost(gn::GotoNode, params::InferenceParams, line::Int)
 #     # If we jump backwards, it's a sign of a loop, and we don't want
 #     # to inline functions with loops because the cost might be wildly
 #     # underestimated if there are many iterations
 #     return gn.label < line ? typemax(Int) : 0
 # end
-function statement_cost(ex::Expr, params::InferenceParams, line::Int)
+function statement_cost(ex::Expr, src::CodeInfo, mod::Module, params::InferenceParams, line::Int)
     head = ex.head
     if is_meta_expr(ex) || head == :copyast # not sure if copyast is right
         return 0
     end
     argcost = 0
     for a in ex.args
-        argcost = plus_saturate(argcost, statement_cost(a, params, line))
+        argcost = plus_saturate(argcost, statement_cost(a, src, mod, params, line))
     end
     if head == :return || head == :(=)
         return argcost
     end
     if head == :call
-        callfunc = ex.args[1]
-        if isa(callfunc, SSAValue) || isa(callfunc, Slot)
-            # Not quite sure what to do here. Would it be better
-            # to be able to look these up, or are these just
-            # constants?
+        extyp = exprtype(ex.args[1], src, mod)
+        if isa(extyp, Type)
             return argcost
         end
-        if isa(callfunc, Type) || isa(callfunc, Function) ||
-                isa(callfunc, QuoteNode) ||
-                isa(callfunc, Symbol) || isa(callfunc, Expr)
-            return argcost
-        end
-        if isa(callfunc, GlobalRef)
-            # Here is where the main cost accounting occurs,
-            # reading out the cost of intrinsics or low-level functions
-            grfunc = abstract_eval_global(callfunc.mod, callfunc.name)
-            if isa(grfunc, Type)
-                return argcost
+        if isa(extyp, Const)
+            f = (extyp::Const).val
+            if isa(f, IntrinsicFunction)
+                iidx = Int(reinterpret(Int32, f::IntrinsicFunction)) + 1
+                if !isassigned(t_ifunc_cost, iidx)
+                    # unknown/unhandled intrinsic
+                    return plus_saturate(argcost, params.inline_nonleaf_penalty)
+                end
+                return plus_saturate(argcost, t_ifunc_cost[iidx])
             end
-            if isa(grfunc, Const)
-                f = (grfunc::Const).val
-                if isa(f, IntrinsicFunction)
-                    iidx = Int(reinterpret(Int32, f::IntrinsicFunction)) + 1
-                    if !isassigned(t_ifunc_cost, iidx)
-                        # unknown/unhandled intrinsic
-                        return plus_saturate(argcost, params.inline_nonleaf_penalty)
-                    end
-                    return plus_saturate(argcost, t_ifunc_cost[iidx])
-                end
-                if isa(f, Function)
-                    # The efficiency of operations like a[i] and s.b
-                    # depend strongly on whether the result can be
-                    # inferred, so check ex.typ
-                    if f == Main.Core.getfield || f == Main.Core.tuple
-                        return plus_saturate(argcost, isknowntype(ex.typ) ? 1 : params.inline_nonleaf_penalty)
-                    elseif f == Main.Core.arrayref
-                        return plus_saturate(argcost, isknowntype(ex.typ) ? 4 : params.inline_nonleaf_penalty)
-                    end
-                    fidx = findfirst(t_ffunc_key, f::Function)
-                    if fidx == 0
-                        # unknown/unhandled builtin or anonymous function
-                        # Use the generic cost of a direct function call
-                        return plus_saturate(argcost, 20)
-                    end
-                    return plus_saturate(argcost, t_ffunc_cost[fidx])
-                end
-                if isa(f, Type) || isa(f, UnionAll)
+            if isa(f, Builtin)
+                # The efficiency of operations like a[i] and s.b
+                # depend strongly on whether the result can be
+                # inferred, so check ex.typ
+                if f == Main.Core.getfield || f == Main.Core.tuple
+                    # we might like to penalize non-inferrability, but
+                    # tuple iteration/destructuring makes that
+                    # impossible
+                    # return plus_saturate(argcost, isknowntype(ex.typ) ? 1 : params.inline_nonleaf_penalty)
                     return argcost
+                elseif f == Main.Core.arrayref
+                    return plus_saturate(argcost, isknowntype(ex.typ) ? 4 : params.inline_nonleaf_penalty)
                 end
-                stmt_cost_error("unhandled f, ", f, " of type ", typeof(f))
+                fidx = findfirst(t_ffunc_key, f::Function)
+                if fidx == 0
+                    # unknown/unhandled builtin or anonymous function
+                    # Use the generic cost of a direct function call
+                    return plus_saturate(argcost, 20)
+                end
+                return plus_saturate(argcost, t_ffunc_cost[fidx])
             end
-            stmt_cost_error("unhandled grfunc, ", grfunc, " of type ", typeof(grfunc))
         end
-        stmt_cost_error("unhandled callfunc, ", callfunc, " with type ", typeof(callfunc))
+        return plus_saturate(argcost, params.inline_nonleaf_penalty)
     elseif head == :foreigncall || ex.head == :invoke
         return plus_saturate(20, argcost)
     elseif head == :llvmcall
@@ -4709,31 +4675,29 @@ function statement_cost(ex::Expr, params::InferenceParams, line::Int)
     argcost
 end
 
-function stmt_cost_error(args...)
-    println(args...)
-    error("statement_cost is broken")
-end
-
-function inline_worthy_stmts(stmts::Vector{Any}, params::InferenceParams,
-                             cost_threshold::Integer=params.inline_cost_threshold)
-    body = Expr(:block)
-    body.args = stmts
-    return inline_worthy(body, params, cost_threshold)
-end
-
-function inline_worthy(body::Expr, params::InferenceParams,
+function inline_worthy(body::Array{Any,1}, src::CodeInfo, mod::Module,
+                       params::InferenceParams,
                        cost_threshold::Integer=params.inline_cost_threshold)
     bodycost = 0
-    if body.head == :block
-        for line = 1:length(body.args)
-            stmt = body.args[line]
-            thiscost = statement_cost(stmt, params, line)
-            bodycost = plus_saturate(bodycost, thiscost)
-        end
-    else
-        bodycost = statement_cost(body, params, 1)
+    for line = 1:length(body)
+        stmt = body[line]
+        thiscost = statement_cost(stmt, src, mod, params, line)
+        bodycost = plus_saturate(bodycost, thiscost)
     end
     bodycost <= cost_threshold
+end
+
+function inline_worthy(body::Expr, src::CodeInfo, mod::Module, params::InferenceParams,
+                       cost_threshold::Integer=params.inline_cost_threshold)
+    bodycost = statement_cost(body, src, mod, params, 1)
+    bodycost <= cost_threshold
+end
+
+function inline_worthy(body::ANY, src::CodeInfo, mod::Module, params::InferenceParams,
+                       cost_threshold::Integer=params.inline_cost_threshold)
+    newbody = exprtype(body, src, mod)
+    !isa(newbody, Expr) && return true
+    inline_worthy(newbody, src, mod, params, cost_threshold)
 end
 
 ssavalue_increment(body::ANY, incr) = body
