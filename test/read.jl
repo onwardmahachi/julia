@@ -176,13 +176,14 @@ for (name, f) in l
     old_text = text
     cleanup()
 
-    for text in [
+    for text_ in [
         old_text,
         String(Char['A' + i % 52 for i in 1:(div(Base.SZ_UNBUFFERED_IO,2))]),
         String(Char['A' + i % 52 for i in 1:(    Base.SZ_UNBUFFERED_IO -1)]),
         String(Char['A' + i % 52 for i in 1:(    Base.SZ_UNBUFFERED_IO   )]),
         String(Char['A' + i % 52 for i in 1:(    Base.SZ_UNBUFFERED_IO +1)])
     ]
+        text = text_
         write(filename, text)
 
         verbose && println("$name readstring...")

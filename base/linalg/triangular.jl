@@ -1833,7 +1833,9 @@ function logm(A0::UpperTriangular{T}) where T<:Union{Float64,Complex{Float64}}
         d4 = norm(AmI^4, 1)^(1/4)
         alpha3 = max(d3, d4)
         if alpha3 <= theta[tmax]
-            for j = 3:tmax
+            local j
+            for j_ = 3:tmax
+                j = j_
                 if alpha3 <= theta[j]
                     break
                 end
@@ -1853,7 +1855,8 @@ function logm(A0::UpperTriangular{T}) where T<:Union{Float64,Complex{Float64}}
             eta = min(alpha3, alpha4)
             if eta <= theta[tmax]
                 j = 0
-                for j = 6:tmax
+                for j_ = 6:tmax
+                    j = j_
                     if eta <= theta[j]
                         m = j
                         break
@@ -2032,7 +2035,9 @@ function invsquaring(A0::UpperTriangular, theta)
         d4 = norm(AmI^4, 1)^(1/4)
         alpha3 = max(d3, d4)
         if alpha3 <= theta[tmax]
-            for j = 3:tmax
+            local j
+            for j_ = 3:tmax
+                j = j_
                 if alpha3 <= theta[j]
                     break
                 elseif alpha3 / 2 <= theta[5] && p < 2
@@ -2056,7 +2061,8 @@ function invsquaring(A0::UpperTriangular, theta)
             eta = min(alpha3, alpha4)
             if eta <= theta[tmax]
                 j = 0
-                for j = 6:tmax
+                for j_ = 6:tmax
+                    j = j_
                     if eta <= theta[j]
                         m = j
                         break

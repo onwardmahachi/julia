@@ -1647,6 +1647,10 @@
             (cons (car e)
                   (map expand-forms (cdr e)))))))
 
+;; If true, this will warn on all `for` loop variables that overwrite outer variables.
+;; If false, this will try to warn only for uses of the last value after the loop.
+(define *warn-all-loop-vars* #f)
+
 (define (expand-for while lhs X body)
   ;; (for (= lhs X) body)
   (let ((coll  (make-ssavalue))
@@ -1661,6 +1665,9 @@
                   (block
                    ;; NOTE: enable this to force loop-local var
                    #;,@(map (lambda (v) `(local ,v)) (lhs-vars lhs))
+                   ,@(if (or *depwarn* *deperror*)
+                         (map (lambda (v) `(warn-if-existing ,v)) (lhs-vars lhs))
+                         '())
                    ,(lower-tuple-assignment (list lhs state)
                                             `(call (top next) ,coll ,state))
                    ,body))))))))
@@ -2491,7 +2498,7 @@
         ((eq? (car e) 'break-block) (unbound-vars (caddr e) bound tab))
         ((eq? (car e) 'with-static-parameters) (unbound-vars (cadr e) bound tab))
         (else (for-each (lambda (x) (unbound-vars x bound tab))
-                            (cdr e))
+                        (cdr e))
               tab)))
 
 ;; local variable identification and renaming, derived from:
@@ -2507,6 +2514,7 @@
         ((eq? (car e) 'local) '(null)) ;; remove local decls
         ((eq? (car e) 'local-def) '(null)) ;; remove local decls
         ((eq? (car e) 'implicit-global) '(null)) ;; remove implicit-global decls
+        ((eq? (car e) 'warn-if-existing) '(null))
         ((eq? (car e) 'lambda)
          (let* ((lv (lam:vars e))
                 (env (append lv env))
@@ -2547,6 +2555,9 @@
                                vars))))
                 (need-rename (need-rename? vars))
                 (need-rename-def (need-rename? vars-def))
+                (deprecated-loop-vars
+                 (filter (lambda (v) (memq v env))
+                         (delete-duplicates (find-decls 'warn-if-existing blok))))
                 ;; new gensym names for conflicting variables
                 (renamed (map named-gensy need-rename))
                 (renamed-def (map named-gensy need-rename-def))
@@ -2576,12 +2587,21 @@
                (if lam ;; update in-place the list of local variables in lam
                    (set-car! (cddr lam)
                              (append! (caddr lam) real-new-vars real-new-vars-def)))
-               (insert-after-meta ;; return the new, expanded scope-block
-                (if (and (pair? body) (eq? (car body) 'block))
-                    body
-                    `(block ,body))
-                (append! (map (lambda (v) `(local ,v)) real-new-vars)
-                         (map (lambda (v) `(local-def ,v)) real-new-vars-def)))))
+               (let* ((warnings (map (lambda (v) `(warn-loop-var ,v)) deprecated-loop-vars))
+                      (body (if *warn-all-loop-vars*
+                                body
+                                (if (and (pair? body) (eq? (car body) 'block))
+                                    (append body warnings)
+                                    `(block ,body ,@warnings)))))
+                 (insert-after-meta ;; return the new, expanded scope-block
+                  (if (and (pair? body) (eq? (car body) 'block))
+                      body
+                      `(block ,body))
+                  (append! (map (lambda (v) `(local ,v)) real-new-vars)
+                           (map (lambda (v) `(local-def ,v)) real-new-vars-def)
+                           (if *warn-all-loop-vars*
+                               (map (lambda (v) `(warn-loop-var ,v)) deprecated-loop-vars)
+                               '()))))))
         ((eq? (car e) 'module)
          (error "module expression not at top level"))
         ((eq? (car e) 'break-block)
@@ -3035,7 +3055,7 @@ f(x) = yt(x)
        ((atom? e) e)
        (else
         (case (car e)
-          ((quote top core globalref outerref line break inert module toplevel null meta) e)
+          ((quote top core globalref outerref line break inert module toplevel null meta warn-loop-var) e)
           ((=)
            (let ((var (cadr e))
                  (rhs (cl-convert (caddr e) fname lam namemap toplevel interp)))
@@ -3282,6 +3302,11 @@ f(x) = yt(x)
         (else (for-each linearize (cdr e))))
   e)
 
+(define (deprecation-message msg)
+  (if *deperror*
+      (error msg)
+      (io.write *stderr* msg)))
+
 ;; this pass behaves like an interpreter on the given code.
 ;; to perform stateful operations, it calls `emit` to record that something
 ;; needs to be done. in value position, it returns an expression computing
@@ -3294,6 +3319,7 @@ f(x) = yt(x)
         (first-line #t)
         (current-loc #f)
         (rett #f)
+        (deprecated-loop-vars (table))
         (arg-map #f)          ;; map arguments to new names if they are assigned
         (label-counter 0)     ;; counter for generating label addresses
         (label-map (table))   ;; maps label names to generated addresses
@@ -3387,6 +3413,11 @@ f(x) = yt(x)
                                     (eq? (cadr e) '_))))
                 (syntax-deprecation #f (string "_ as an rvalue" (linenode-string current-loc))
                                     ""))
+            (if (and (not *warn-all-loop-vars*) (has? deprecated-loop-vars e))
+                (begin (deprecation-message
+                        (string "Use of final value of loop variable \"" e "\"" (linenode-string current-loc) " "
+                                "is deprecated. In the future the variable will be local to the loop instead." #\newline))
+                       (del! deprecated-loop-vars e)))
             (cond (tail  (emit-return e1))
                   (value e1)
                   ((or (eq? e1 'true) (eq? e1 'false)) #f)
@@ -3416,6 +3447,8 @@ f(x) = yt(x)
                     (lhs (if (and arg-map (symbol? lhs))
                              (get arg-map lhs lhs)
                              lhs)))
+               (if (and (not *warn-all-loop-vars*) (has? deprecated-loop-vars lhs))
+                   (del! deprecated-loop-vars lhs))
                (if value
                    (let ((rr (if (or (atom? rhs) (ssavalue? rhs) (eq? (car rhs) 'null))
                                  rhs (make-ssavalue))))
@@ -3602,6 +3635,14 @@ f(x) = yt(x)
             ((implicit-global) #f)
             ((const) (emit e))
             ((isdefined) (if tail (emit-return e) e))
+            ((warn-loop-var)
+             (if *warn-all-loop-vars*
+                 (deprecation-message
+                  (string "Loop variable \"" (cadr e) "\"" (linenode-string current-loc) " "
+                          "overwrites a variable in an enclosing scope. "
+                          "In the future the variable will be local to the loop instead." #\newline))
+                 (put! deprecated-loop-vars (cadr e) #t))
+             '(null))
 
             ;; top level expressions returning values
             ((abstract_type bits_type composite_type thunk toplevel module)

@@ -57,7 +57,8 @@ function parse(s::AbstractString)
     i = 1
     while i < length(list)
         if isa(list[i],AbstractString)
-            for j = i+1:length(list)
+            for j_ = i+1:length(list)
+                j = j_
                 if !isa(list[j],AbstractString)
                     j -= 1
                     break
