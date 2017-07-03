@@ -1114,7 +1114,7 @@ end
 @deprecate(SharedArray(filename::AbstractString, ::Type{T}, dims::NTuple, offset; kwargs...) where {T},
            SharedArray{T}(filename, dims, offset; kwargs...))
 
-@noinline function is_intrinsic_expr(x::ANY)
+@noinline function is_intrinsic_expr(@nospecialize(x))
     Base.depwarn("is_intrinsic_expr is deprecated. There are no intrinsic functions anymore.", :is_intrinsic_expr)
     return false
 end
@@ -1372,11 +1372,11 @@ _current_module() = ccall(:jl_get_current_module, Ref{Module}, ())
     depwarn("binding_module(symbol) is deprecated, use `binding_module(module, symbol)` instead.", :binding_module)
     return binding_module(_current_module(), s)
 end
-@noinline function expand(x::ANY)
+@noinline function expand(@nospecialize(x))
     depwarn("expand(x) is deprecated, use `expand(module, x)` instead.", :expand)
     return expand(_current_module(), x)
 end
-@noinline function macroexpand(x::ANY)
+@noinline function macroexpand(@nospecialize(x))
     depwarn("macroexpand(x) is deprecated, use `macroexpand(module, x)` instead.", :macroexpand)
     return macroexpand(_current_module(), x)
 end
@@ -1518,6 +1518,8 @@ function replace(s::AbstractString, pat, f, n::Integer)
         replace_new(String(s), pat, f, n)
     end
 end
+
+# ::ANY is deprecated in src/method.c
 
 # END 0.7 deprecations
 

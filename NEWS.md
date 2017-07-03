@@ -13,6 +13,9 @@ Language changes
   * The syntax `1.+2` is deprecated, since it is ambiguous: it could mean either
     `1 .+ 2` (the current meaning) or `1. + 2` ([#19089]).
 
+  * Declaring arguments as `x::ANY` to avoid specialization has been replaced
+    by `@nospecialize x` ([#22666]).
+
 Breaking changes
 ----------------
 

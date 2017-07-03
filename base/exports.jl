@@ -1285,6 +1285,7 @@ export
     @simd,
     @inline,
     @noinline,
+    @nospecialize,
     @polly,
 
     @assert,

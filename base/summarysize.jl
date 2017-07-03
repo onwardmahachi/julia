@@ -19,9 +19,10 @@ Compute the amount of memory used by all unique objects reachable from the argum
 - `chargeall`: specifies the types of objects to always charge the size of all of their
   fields, even if those fields would normally be excluded.
 """
-function summarysize(obj::ANY;
-                     exclude::ANY = Union{DataType, TypeName, Method},
-                     chargeall::ANY = Union{TypeMapEntry, Core.MethodInstance})
+function summarysize(obj;
+                     exclude = Union{DataType, TypeName, Method},
+                     chargeall = Union{TypeMapEntry, Core.MethodInstance})
+    @nospecialize obj exclude chargeall
     ss = SummarySize(ObjectIdDict(), Any[], Int[], exclude, chargeall)
     size::Int = ss(obj)
     while !isempty(ss.frontier_x)
@@ -60,9 +61,9 @@ function summarysize(obj::ANY;
     return size
 end
 
-(ss::SummarySize)(obj::ANY) = _summarysize(ss, obj)
+(ss::SummarySize)(@nospecialize obj) = _summarysize(ss, obj)
 # define the general case separately to make sure it is not specialized for every type
-@noinline function _summarysize(ss::SummarySize, obj::ANY)
+@noinline function _summarysize(ss::SummarySize, @nospecialize obj)
     key = pointer_from_objref(obj)
     haskey(ss.seen, key) ? (return 0) : (ss.seen[key] = true)
     if nfields(obj) > 0
