@@ -62,3 +62,10 @@ if opt_level > 0
 end
 
 @test !contains(get_llvm(isequal, Tuple{Nullable{BigFloat}, Nullable{BigFloat}}), "%gcframe")
+
+if opt_level > 0
+    @test !contains(get_llvm((a)->ccall(:jl_breakpoint, Void, (Ref{Float64},), a),
+                             Tuple{Float64}), "jl_gc_pool_alloc")
+    @test contains(get_llvm((a)->ccall(:jl_breakpoint, Void, (Ref{Any},), a),
+                            Tuple{Float64}), "jl_gc_pool_alloc")
+end

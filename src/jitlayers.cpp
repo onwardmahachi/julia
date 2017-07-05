@@ -108,6 +108,7 @@ void addOptimizationPasses(legacy::PassManagerBase *PM, int opt_level)
 #endif
     if (opt_level == 0) {
         PM->add(createCFGSimplificationPass()); // Clean up disgusting code
+        PM->add(createAllocOptPass(false));
 #if JL_LLVM_VERSION < 50000
         PM->add(createBarrierNoopPass());
         PM->add(createLowerExcHandlersPass());
@@ -147,6 +148,7 @@ void addOptimizationPasses(legacy::PassManagerBase *PM, int opt_level)
     // effectiveness of the optimization, but should retain correctness.
 #if JL_LLVM_VERSION < 50000
     PM->add(createLowerExcHandlersPass());
+    PM->add(createAllocOptPass(true));
     PM->add(createLateLowerGCFramePass());
     // Remove dead use of ptls
     PM->add(createDeadCodeEliminationPass());
@@ -161,6 +163,12 @@ void addOptimizationPasses(legacy::PassManagerBase *PM, int opt_level)
     PM->add(createAlwaysInlinerPass()); // Respect always_inline
 #endif
 
+#if JL_LLVM_VERSION >= 50000
+    // Running `memcpyopt` between this and `sroa` seems to give `sroa` a hard time
+    // merging the `alloca` for the unboxed data and the `alloca` created by the `alloc_opt`
+    // pass.
+    PM->add(createAllocOptPass(true));
+#endif
     PM->add(createInstructionCombiningPass()); // Cleanup for scalarrepl.
     PM->add(createSROAPass());                 // Break up aggregate allocas
     PM->add(createInstructionCombiningPass()); // Cleanup for scalarrepl.
