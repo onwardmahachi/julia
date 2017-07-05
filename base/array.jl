@@ -147,7 +147,7 @@ function reinterpret(::Type{T}, a::Array{S}) where T where S
 end
 
 function reinterpret(::Type{T}, a::Array{S}, dims::NTuple{N,Int}) where T where S where N
-    function throwbits{S,T,U}(::Type{S}, ::Type{T}, ::Type{U})
+    function throwbits(::Type{S}, ::Type{T}, ::Type{U}) where {S,T,U}
         @_noinline_meta
         throw(ArgumentError("cannot reinterpret Array{$(S)} to ::Type{Array{$(T)}}, type $(U) is not a bits type"))
     end

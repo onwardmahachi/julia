@@ -96,9 +96,10 @@ reshape(parent::AbstractArray, dims::Int...) = reshape(parent, dims)
 reshape(parent::AbstractArray, dims::Union{Int,Colon}...) = reshape(parent, dims)
 reshape(parent::AbstractArray, dims::Tuple{Vararg{Union{Int,Colon}}}) = _reshape(parent, _reshape_uncolon(parent, dims))
 @inline function _reshape_uncolon(A, dims)
-    @noinline throw1(dims) = throw(DimensionMismatch("new dimensions $(dims) may have at most one omitted dimension specified by Colon()"))
-    @noinline throw2(A, dims) =
-        throw(DimensionMismatch("array size $(length(A)) must be divisible by the product of the new dimensions $dims"))
+    @noinline throw1(dims) = throw(DimensionMismatch(string("new dimensions $(dims) ",
+        "may have at most one omitted dimension specified by `Colon()`")))
+    @noinline throw2(A, dims) = throw(DimensionMismatch(string("array size $(length(A)) ",
+        "must be divisible by the product of the new dimensions $dims")))
     pre = _before_colon(dims...)
     post = _after_colon(dims...)
     any(d -> d isa Colon, post) && throw1(dims)

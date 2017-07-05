@@ -16,7 +16,7 @@ struct InferenceParams
     inlining::Bool
     inline_cost_threshold::Int  # number of CPU cycles beyond which it's not worth inlining
     inline_nonleaf_penalty::Int # penalty for dynamic dispatch
-    inline_tupleret_bonus::Int  # extra willlingness to inline for non-isbits tuple return types
+    inline_tupleret_bonus::Int  # extra willingness for non-isbits tuple return types
 
     # parameters limiting potentially-infinite types (configurable)
     MAX_METHODS::Int
@@ -494,8 +494,8 @@ add_tfunc(checked_udiv_int, 2, 2, math_tfunc, 40)
 add_tfunc(checked_srem_int, 2, 2, math_tfunc, 40)
 add_tfunc(checked_urem_int, 2, 2, math_tfunc, 40)
     ## functions ##
-add_tfunc(abs_float, 1, 1, math_tfunc, 5)
-add_tfunc(copysign_float, 2, 2, math_tfunc, 5)
+add_tfunc(abs_float, 1, 1, math_tfunc, 2)
+add_tfunc(copysign_float, 2, 2, math_tfunc, 2)
 add_tfunc(flipsign_int, 2, 2, math_tfunc, 1)
 add_tfunc(ceil_llvm, 1, 1, math_tfunc, 10)
 add_tfunc(floor_llvm, 1, 1, math_tfunc, 10)
