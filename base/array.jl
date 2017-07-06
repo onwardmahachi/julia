@@ -141,7 +141,7 @@ end
 ## Union isbits selector bytes
 function selectorbytes(a::Array{T, N}) where {T, N}
     isbitsunion(T) || return UInt8[]
-    return unsafe_wrap(Array{UInt8, N}, convert(Ptr{UInt8}, pointer(a)) + length(a) * elsize(T), size(a))
+    return unsafe_wrap(Array{UInt8, N}, convert(Ptr{UInt8}, pointer(a)) + length(a) * elsize(a), size(a))
 end
 
 ## copy ##
