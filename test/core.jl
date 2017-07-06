@@ -5080,16 +5080,10 @@ module UnionOptimizations
 
 using Base.Test
 
-const testuniontypes = []
-for i = 1:128
-    @eval struct $(Symbol("TestUnionType$i")); val::Int8; end
-    @eval push!(testuniontypes, $(Symbol("TestUnionType$i")))
-end
-
-const boxedunions = [Union{}, Union{String, Void}, Union{testuniontypes...}]
+const boxedunions = [Union{}, Union{String, Void}]
 const unboxedunions = [Union{Int8, Void}, Union{Int8, Float16, Void},
                        Union{Int8, UInt8, Int16, UInt16, Int32, UInt32, Int64, UInt64, Int128, UInt128},
-                       Union{Char, Date, Number}]
+                       Union{Char, Date, Int}]
 
 initvalue(::Type{Void}) = nothing
 initvalue(::Type{Char}) = '\0'
@@ -5101,16 +5095,28 @@ initvalue2(::Type{Char}) = Char(0x01)
 initvalue2(::Type{Date}) = Date(1)
 initvalue2(::Type{T}) where {T <: Number} = T(1)
 
+# U = unboxedunions[1]
+
+# mutable struct UnionField
+#     u::U
+# end
+
+# x = UnionField(initvalue(Base.uniontypes(U)[1]))
+# @test x.u === initvalue(Base.uniontypes(U)[1])
+# x.u = initvalue2(Base.uniontypes(U)[1])
+# @test x.u === initvalue2(Base.uniontypes(U)[1])
+# x.u = initvalue(Base.uniontypes(U)[2])
+# @test x.u === initvalue(Base.uniontypes(U)[2])
 
 for U in boxedunions
     for N in (1, 2, 3, 4)
-        A = Array{U, N}(0)
+        A = Array{U}(ntuple(x->0, N)...)
         @test isempty(A)
         @test Core.sizeof(A) == 0
 
-        A = Array{U, N}(100)
-        @test length(A) == 100
-        @test Core.sizeof(A) == 800
+        A = Array{U}(ntuple(x->10, N)...)
+        @test length(A) == 10^N
+        @test Core.sizeof(A) == 8 * (10^N)
         @test !isassigned(A, 1)
     end
 end
@@ -5123,13 +5129,13 @@ A5 = [1 2 3; 4 5 6]
 
 for U in unboxedunions
     for N in (1, 2, 3, 4)
-        A = Array{U, N}(0)
+        A = Array{U}(ntuple(x->0, N)...)
         @test isempty(A)
         @test Core.sizeof(A) == 0
 
         len = ntuple(x->10, N)
         mxsz = maximum(sizeof, Base.uniontypes(U))
-        A = Array{U, N}(len)
+        @time A = Array{U}(len)
         @test length(A) == prod(len)
         @test Core.sizeof(A) == prod(len) * mxsz
         @test isassigned(A, 1)
@@ -5137,6 +5143,12 @@ for U in unboxedunions
 
         # arrayref / arrayset
         F = Base.uniontypes(U)[1]
+        @show F
+        s = ccall(:jl_elsize2, Csize_t, (Any,), A)
+        l = ccall(:jl_array_len2, Csize_t, (Any,), A)
+        @show s, l
+        @show A[1]
+        # @show A
         @test A[1] === initvalue(F)
         A[1] = initvalue2(F)
         @test A[1] === initvalue2(F)
@@ -5151,9 +5163,8 @@ for U in unboxedunions
         end
 
         # serialize / deserialize
-        #TODO
         io = IOBuffer()
-        serialize(io, v)
+        serialize(io, A)
         seekstart(io)
         A2 = deserialize(io)
         @test A == A2
@@ -5163,6 +5174,10 @@ for U in unboxedunions
         @test Core.sizeof(A) == prod(len) * mxsz
         @test isassigned(A, 1)
         @test A[1] === initvalue2(F)
+
+        # copy
+        A4 = copy(A)
+        @test A == A4
 
         if N == 1
             ## Dequeue functions
@@ -5203,7 +5218,7 @@ for U in unboxedunions
             # deleteat!
             F = Base.uniontypes(U)[1]
             A = U[rand(F(1):F(len)) for i = 1:len]
-            deleteat!(A, sort!(unique(A[1:4])))
+            deleteat!(A, map(Int, sort!(unique(A[1:4]))))
             A = U[initvalue2(F2) for i = 1:len]
             deleteat!(A, 1:2)
             @test length(A) == len - 2
@@ -5236,7 +5251,7 @@ for U in unboxedunions
                 @test A[2] === initvalue2(F)
             end
 
-            # push! / append! / prepend!
+            # push! / append! / prepend! TODO
             A = U[initvalue2(F2) for i = 1:len]
             push!(A, initvalue2(F))
             @test A[end] === initvalue2(F)
@@ -5249,11 +5264,19 @@ for U in unboxedunions
             @test A[2] === initvalue2(F)
             @test A[1] === initvalue(F)
 
-            # insert! TODO
+            # insert!
             A = U[initvalue2(F2) for i = 1:len]
             insert!(A, 2, initvalue2(F))
+            @test A[2] === initvalue2(F)
+            @test A[1] === initvalue2(F2)
+            @test A[3] === initvalue2(F2)
+            @test A[end] === initvalue2(F2)
             A = U[initvalue2(F2) for i = 1:len]
             insert!(A, 8, initvalue2(F))
+            @test A[8] === initvalue2(F)
+            @test A[7] === initvalue2(F2)
+            @test A[9] === initvalue2(F2)
+            @test A[end] === initvalue2(F2)
 
             # splice!
             A = U[initvalue2(F2) for i = 1:len]
